@@ -4,6 +4,8 @@ const User = require("../Models/Users");
 const GameWallet = require("../Models/GameWallet");
 const RandomUser = require("../Models/RandomUser");
 // const QRCode = require('qrcode');
+const jwt = require("jsonwebtoken");
+
 const { createActualBingoRoom, addBotAndStartGame, generateBingoTicket } = require("../Controllers/Room");
 require("dotenv").config();
 
@@ -498,10 +500,11 @@ module.exports = (server) => {
                 await room.save();
 
                 const allReady = room.players.every(p => p.isReady);
+                console.log("allReady",allReady)
                 if (allReady) {
                     const lobby = await GameWallet.findById(room.gamelobby_id);
                     const entryFee = lobby ? lobby.entryCoinsUsed : 0;
-
+                    console.log("entryFee",entryFee)
                     if (entryFee > 0) {
                         const realPlayerIds = room.players
                             .filter(p => !p.bot)
