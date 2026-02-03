@@ -543,77 +543,88 @@ module.exports = (server) => {
             // });
 
             socket.on("submitTicket", async ({ user_id, roomId, tickets }) => {
-                try {
-                    if (user_id != socket.verified_id) {
-                        return socket.emit("error", { message: "Unauthorized!" });
-                    }
+    try {
+        if (user_id != socket.verified_id) {
+            return socket.emit("error", { message: "Unauthorized!" });
+        }
 
-                    // 1. Document ko fetch karein
-                    const room = await Room.findOne({ roomId });
-                    if (!room) return;
+        // 1. ATOMIC UPDATE: Player ka data update karein aur updated room wapas lein
+        // Yeh query version error nahi degi kyunki ye direct DB mein modify karti hai
+        const updatedRoom = await Room.findOneAndUpdate(
+            { 
+                roomId, 
+                "players.user_id": user_id 
+            },
+            { 
+                $set: { 
+                    "players.$.tickets": tickets,
+                    "players.$.isReady": true,
+                    "players.$.markedNumbers": tickets.map(() => []),
+                    "players.$.completedLines": tickets.map(() => 0)
+                } 
+            },
+            { new: true } // updated document wapas chahiye
+        );
 
-                    // 2. Player updates (In-memory changes)
-                    const player = room.players.find(p => p.user_id.toString() === user_id.toString());
-                    console.log("player",player)
-                    if (player) {
-                        player.tickets = tickets;
-                        player.isReady = true;
-                        player.markedNumbers = tickets.map(() => []);
-                        player.completedLines = tickets.map(() => 0);
-                    }
+        if (!updatedRoom) return;
 
-                    // 3. Check if all players are ready BEFORE saving
-                    const allReady = room.players.every(p => p.isReady);
-                    console.log("allReady",allReady)
-                    if (allReady) {
-                        const lobby = await GameWallet.findById(room.gamelobby_id);
-                        const entryFee = lobby ? lobby.entryCoinsUsed : 0;
+        // 2. Ab check karein kya saare players ready hain updatedRoom se
+        const allReady = updatedRoom.players.every(p => p.isReady);
+        console.log("allReady check:", allReady);
 
-                        if (entryFee > 0) {
-                            const realPlayerIds = room.players
-                                .filter(p => !p.bot)
-                                .map(p => p.user_id);
+        if (allReady) {
+            // Room status ko update karne ke liye ek atomic update aur
+            const finalRoom = await Room.findOneAndUpdate(
+                { roomId, status: { $ne: 'playing' } }, // Avoid double activation
+                { 
+                    $set: { 
+                        status: 'playing',
+                        turn: updatedRoom.players[0].user_id
+                    } 
+                },
+                { new: true }
+            );
 
-                            await User.updateMany(
-                                { user_id: { $in: realPlayerIds } },
-                                { $inc: { coins: -entryFee } }
-                            );
-                        }
+            if (finalRoom) {
+                // Coins deduct logic (Bulk)
+                const lobby = await GameWallet.findById(finalRoom.gamelobby_id);
+                const entryFee = lobby ? lobby.entryCoinsUsed : 0;
 
-                        room.status = 'playing';
-                        const firstPlayer = room.players[0];
-                        room.turn = firstPlayer.user_id;
-                    }
+                if (entryFee > 0) {
+                    const realPlayerIds = finalRoom.players
+                        .filter(p => !p.bot)
+                        .map(p => p.user_id);
 
-                    // 4. SIRF EK BAAR SAVE KAREIN
-                    // Isse VersionError ke chances khatam ho jayenge
-                    await room.save();
-
-                    // 5. Logic execution after save
-                    if (allReady) {
-                        io.to(roomId).emit("gameStarted", {
-                            roomId: roomId,
-                            players: room.players,
-                            status: 'playing',
-                            turn: room.turn,
-                            calledNumbers: []
-                        });
-
-                        const firstPlayer = room.players[0];
-                        if (firstPlayer.bot) {
-                            handleBotTurn(roomId, firstPlayer.user_id, io);
-                        } else {
-                            startTurnTimer(roomId, firstPlayer.user_id, io);
-                        }
-                    } else {
-                        socket.emit("waitingForOpponent", { message: "Opponent is still filling their cards..." });
-                    }
-
-                } catch (err) {
-                    console.error("Submit Error:", err);
-                    // Agar fir bhi error aaye to retry logic ya user ko inform karein
+                    await User.updateMany(
+                        { user_id: { $in: realPlayerIds } },
+                        { $inc: { coins: -entryFee } }
+                    );
                 }
-            });
+
+                // Game Start Events
+                io.to(roomId).emit("gameStarted", {
+                    roomId: roomId,
+                    players: finalRoom.players,
+                    status: 'playing',
+                    turn: finalRoom.turn,
+                    calledNumbers: []
+                });
+
+                const firstPlayer = finalRoom.players[0];
+                if (firstPlayer.bot) {
+                    handleBotTurn(roomId, firstPlayer.user_id, io);
+                } else {
+                    startTurnTimer(roomId, firstPlayer.user_id, io);
+                }
+            }
+        } else {
+            socket.emit("waitingForOpponent", { message: "Opponent is still filling their cards..." });
+        }
+
+    } catch (err) {
+        console.error("Submit Error:", err);
+    }
+});
 
 
             function startTurnTimer(roomId, nextUserId, io, isPower = false,) {
