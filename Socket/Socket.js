@@ -153,12 +153,12 @@ module.exports = (server) => {
 
         socket.on("createPrivateRoom", async ({ user_id, cardCount, gamelobby_id }) => {
 
-            
+
             try {
 
                 if (user_id != socket.verified_id) {
-          return socket.emit("error", { message: "Unauthorized!" });
-        }
+                    return socket.emit("error", { message: "Unauthorized!" });
+                }
 
                 const user = await User.findOne({ user_id }).lean();
                 if (!user) return;
@@ -200,9 +200,9 @@ module.exports = (server) => {
         socket.on("joinPrivateRoom", async ({ user_id, joinKey }) => {
             try {
 
-                        if (user_id != socket.verified_id) {
-          return socket.emit("error", { message: "Unauthorized!" });
-        }
+                if (user_id != socket.verified_id) {
+                    return socket.emit("error", { message: "Unauthorized!" });
+                }
                 // console.log('currentPlayer')
                 let room = await Room.findOne({ joinKey });
                 if (!room) return socket.emit("error", { message: "Room not found!" });
@@ -275,9 +275,9 @@ module.exports = (server) => {
         socket.on("startPrivateGame", async ({ roomId, user_id }) => {
             try {
 
-                        if (user_id != socket.verified_id) {
-          return socket.emit("error", { message: "Unauthorized!" });
-        }
+                if (user_id != socket.verified_id) {
+                    return socket.emit("error", { message: "Unauthorized!" });
+                }
 
                 const room = await Room.findOne({ roomId });
                 // console.log("room", room);
@@ -335,9 +335,9 @@ module.exports = (server) => {
 
         socket.on("joinGame", async ({ user_id, maxPlayers, cardCount, gamelobby_id }) => {
             try {
-        if (user_id != socket.verified_id) {
-          return socket.emit("error", { message: "Unauthorized!" });
-        }
+                if (user_id != socket.verified_id) {
+                    return socket.emit("error", { message: "Unauthorized!" });
+                }
                 const activeRoom = await Room.findOne({
                     "players.user_id": user_id,
                     status: { $in: ['setup', 'playing'] }
@@ -480,118 +480,487 @@ module.exports = (server) => {
             });
 
             waitingRooms.delete(roomKey);
-        }
-        socket.on("submitTicket", async ({ user_id, roomId, tickets }) => {
-            try {
-                        if (user_id != socket.verified_id) {
-          return socket.emit("error", { message: "Unauthorized!" });
-        }
-                const room = await Room.findOne({ roomId });
-                if (!room) return;
+            }
+            // socket.on("submitTicket", async ({ user_id, roomId, tickets }) => {
+            //     try {
+            //                 if (user_id != socket.verified_id) {
+            //   return socket.emit("error", { message: "Unauthorized!" });
+            // }
+            //         const room = await Room.findOne({ roomId });
+            //         if (!room) return;
 
-                const player = room.players.find(p => p.user_id === user_id);
-                if (player) {
-                    player.tickets = tickets;
-                    player.isReady = true;
-                    player.markedNumbers = tickets.map(() => []);
-                    player.completedLines = tickets.map(() => 0);
+            //         const player = room.players.find(p => p.user_id === user_id);
+            //         if (player) {
+            //             player.tickets = tickets;
+            //             player.isReady = true;
+            //             player.markedNumbers = tickets.map(() => []);
+            //             player.completedLines = tickets.map(() => 0);
+            //         }
+
+            //         await room.save();
+
+            //         const allReady = room.players.every(p => p.isReady);
+            //         console.log("allReady",allReady)
+            //         if (allReady) {
+            //             const lobby = await GameWallet.findById(room.gamelobby_id);
+            //             const entryFee = lobby ? lobby.entryCoinsUsed : 0;
+            //             console.log("entryFee",entryFee)
+            //             if (entryFee > 0) {
+            //                 const realPlayerIds = room.players
+            //                     .filter(p => !p.bot)
+            //                     .map(p => p.user_id);
+
+            //                 // Bulk update: Sabhi players ke coins ek saath deduct karein
+            //                 await User.updateMany(
+            //                     { user_id: { $in: realPlayerIds } },
+            //                     { $inc: { coins: -entryFee } }
+            //                 );
+            //             }
+
+            //             room.status = 'playing';
+            //             const firstPlayer = room.players[0];
+            //             room.turn = firstPlayer.user_id;
+            //             await room.save();
+
+            //             io.to(roomId).emit("gameStarted", {
+            //                 roomId: roomId,
+            //                 players: room.players,
+            //                 status: 'playing',
+            //                 turn: room.turn,
+            //                 calledNumbers: []
+            //             });
+
+            //             // Agar pehla turn Bot ka hai
+            //             if (firstPlayer.bot) {
+            //                 handleBotTurn(roomId, firstPlayer.user_id, io);
+            //             } else {
+            //                 startTurnTimer(roomId, firstPlayer.user_id, io);
+            //             }
+            //         } else {
+            //             socket.emit("waitingForOpponent", { message: "Opponent is still filling their cards..." });
+            //         }
+            //     } catch (err) { console.error("Submit Error:", err); }
+            // });
+
+            socket.on("submitTicket", async ({ user_id, roomId, tickets }) => {
+                try {
+                    if (user_id != socket.verified_id) {
+                        return socket.emit("error", { message: "Unauthorized!" });
+                    }
+
+                    // 1. Document ko fetch karein
+                    const room = await Room.findOne({ roomId });
+                    if (!room) return;
+
+                    // 2. Player updates (In-memory changes)
+                    const player = room.players.find(p => p.user_id === user_id);
+                    if (player) {
+                        player.tickets = tickets;
+                        player.isReady = true;
+                        player.markedNumbers = tickets.map(() => []);
+                        player.completedLines = tickets.map(() => 0);
+                    }
+
+                    // 3. Check if all players are ready BEFORE saving
+                    const allReady = room.players.every(p => p.isReady);
+
+                    if (allReady) {
+                        const lobby = await GameWallet.findById(room.gamelobby_id);
+                        const entryFee = lobby ? lobby.entryCoinsUsed : 0;
+
+                        if (entryFee > 0) {
+                            const realPlayerIds = room.players
+                                .filter(p => !p.bot)
+                                .map(p => p.user_id);
+
+                            await User.updateMany(
+                                { user_id: { $in: realPlayerIds } },
+                                { $inc: { coins: -entryFee } }
+                            );
+                        }
+
+                        room.status = 'playing';
+                        const firstPlayer = room.players[0];
+                        room.turn = firstPlayer.user_id;
+                    }
+
+                    // 4. SIRF EK BAAR SAVE KAREIN
+                    // Isse VersionError ke chances khatam ho jayenge
+                    await room.save();
+
+                    // 5. Logic execution after save
+                    if (allReady) {
+                        io.to(roomId).emit("gameStarted", {
+                            roomId: roomId,
+                            players: room.players,
+                            status: 'playing',
+                            turn: room.turn,
+                            calledNumbers: []
+                        });
+
+                        const firstPlayer = room.players[0];
+                        if (firstPlayer.bot) {
+                            handleBotTurn(roomId, firstPlayer.user_id, io);
+                        } else {
+                            startTurnTimer(roomId, firstPlayer.user_id, io);
+                        }
+                    } else {
+                        socket.emit("waitingForOpponent", { message: "Opponent is still filling their cards..." });
+                    }
+
+                } catch (err) {
+                    console.error("Submit Error:", err);
+                    // Agar fir bhi error aaye to retry logic ya user ko inform karein
+                }
+            });
+
+
+            function startTurnTimer(roomId, nextUserId, io, isPower = false,) {
+                // console.log("room",roomId)
+                if (turnTimeouts[roomId]) clearTimeout(turnTimeouts[roomId]);
+
+                turnTimeouts[roomId] = setTimeout(async () => {
+                    try {
+                        const room = await Room.findOne({ roomId });
+                        if (!room || room.turn !== nextUserId || room.status !== 'playing') return;
+
+                        const playerIdx = room.players.findIndex(p => p.user_id === nextUserId);
+                        const player = room.players[playerIdx];
+                        // console.log("player",player)
+                        // 1st Time Miss: Auto-Call Number
+                        if (!player.missedTurns || player.missedTurns < 1) {
+                            player.missedTurns = (player.missedTurns || 0) + 1;
+
+                            // Bot logic use karke ek random number uthayein jo ticket mein ho
+                            let availableNumbers = player.tickets[0].flat().filter(n => !room.calledNumbers.includes(n));
+                            const autoNumber = availableNumbers[Math.floor(Math.random() * availableNumbers.length)];
+
+                            console.log(`Auto-calling for ${nextUserId}`);
+                            await processMove(room, autoNumber, nextUserId, io, isPower);
+                        }
+                        // 2nd Time Miss: Opponent Wins
+                        else {
+                            room.status = 'finished';
+                            // console.log("status",room.status)
+                            // Saamne wala winner (2 players case mein index 0 ka 1, aur 1 ka 0)
+                            const winnerIndex = (playerIdx + 1) % room.players.length;
+                            const winner = room.players[winnerIndex];
+
+                            room.winner = winner.name;
+                            await room.save();
+                            await Room.deleteOne({ roomId: room.roomId });
+
+                            io.to(roomId).emit("gameOver", {
+                                winner: winner.name,
+                                user_id: winner.user_id,
+                                reason: "Opponent missed turns twice."
+                            });
+
+
+
+                            const wallet = await GameWallet.findOne({ _id: room.gamelobby_id });
+                            if (!wallet) return;
+
+                            // 🔹 winner coins ADD (not replace)
+                            await User.findOneAndUpdate(
+                                { user_id: winner.user_id },
+                                {
+                                    $inc: {
+                                        coins: wallet.coinsWon, // ex: 400
+                                        diamonds: wallet.diamondsWon
+                                    }
+                                },
+                                { new: true }
+                            );
+                        }
+                    } catch (e) { console.error("Timer Error:", e); }
+                }, 30000);
+            }
+            // async function processMove(room, number, user_id, io) {
+            //     const roomId = room.roomId;
+            //     // console.log("number",number)
+            //     if (!room.calledNumbers.includes(number)) {
+            //         room.calledNumbers.push(number);
+            //     }
+
+            //     const playersProgress = room.players.map(player => {
+            //         player.tickets.forEach((ticket, tIdx) => {
+            //             player.completedLines[tIdx] = checkBingoLines(ticket, room.calledNumbers);
+            //         });
+            //         return { user_id: player.user_id, completedLines: player.completedLines };
+            //     });
+
+            //     const currentIndex = room.players.findIndex(p => p.user_id === user_id);
+            //     const nextPlayer = room.players[(currentIndex + 1) % room.players.length];
+            //     room.turn = nextPlayer.user_id;
+
+            //     await room.save();
+            //     // console.log("playersProgress",playersProgress)
+            //     io.to(roomId).emit("numberCalled", {
+            //         number: number,
+            //         turn: room.turn,
+            //         players: playersProgress
+            //     });
+
+            //     if (nextPlayer.bot) {
+            //         handleBotTurn(roomId, nextPlayer.user_id, io);
+            //     } else {
+            //         // console.log("roomId",roomId ,nextPlayer.user_id)
+            //         startTurnTimer(roomId, nextPlayer.user_id, io);
+            //     }
+            // }
+            async function processMove(room, number, user_id, io, isPower = false) {
+                const roomId = room.roomId;
+                const currentIndex = room.players.findIndex(p => p.user_id === user_id);
+                const currentPlayer = room.players[currentIndex];
+
+                // 1. Numbers add aur progress check
+                if (!room.calledNumbers.includes(number)) {
+                    room.calledNumbers.push(number);
+                }
+
+                // 2. Logic for Power and Turn Management
+                let shouldChangeTurn = true;
+
+                if (isPower && !currentPlayer.hasUsedPower) {
+                    // Agar player ne power button dabaya hai aur uske paas power bachi hai
+                    if (currentPlayer.powerTurnCount === 0) {
+                        currentPlayer.powerTurnCount = 1; // Pehla turn count karo
+                        currentPlayer.hasUsedPower = true,
+                            shouldChangeTurn = false;         // Turn change NAHI hoga
+                    }
+                } else if (currentPlayer.powerTurnCount === 1) {
+                    // Player apna extra turn chal chuka hai
+                    currentPlayer.powerTurnCount = 0;
+                    currentPlayer.hasUsedPower = true;    // AB power permanently khatam
+                    shouldChangeTurn = true;
+
+
+                    const updatedUser = await User.findOneAndUpdate({
+                        user_id, power: { $gt: 0 }
+                    }, { $inc: { power: -1 } }, { new: true });
+
+                    // Ab turn change hoga
+                } else {
+                    // Normal move logic
+                    shouldChangeTurn = true;
+                }
+
+                // 3. Sabhi players ka updated data (including power status) taiyar karein
+                const playersProgress = room.players.map(player => {
+                    // Har ticket ke liye bingo lines check karein
+                    player.tickets.forEach((ticket, tIdx) => {
+                        player.completedLines[tIdx] = checkBingoLines(ticket, room.calledNumbers);
+                    });
+
+                    return {
+                        user_id: player.user_id,
+                        completedLines: player.completedLines,
+                        hasUsedPower: player.hasUsedPower, // Frontend ko batane ke liye ki button hide/disable karna hai
+                        powerTurnCount: player.powerTurnCount // Debugging ya UI ke liye
+                    };
+                });
+
+                // 4. Turn change management
+                if (shouldChangeTurn) {
+                    const nextIndex = (currentIndex + 1) % room.players.length;
+                    room.turn = room.players[nextIndex].user_id;
+                } else {
+                    room.turn = currentPlayer.user_id; // Turn wapas usi ko do
                 }
 
                 await room.save();
 
-                const allReady = room.players.every(p => p.isReady);
-                console.log("allReady",allReady)
-                if (allReady) {
-                    const lobby = await GameWallet.findById(room.gamelobby_id);
-                    const entryFee = lobby ? lobby.entryCoinsUsed : 0;
-                    console.log("entryFee",entryFee)
-                    if (entryFee > 0) {
-                        const realPlayerIds = room.players
-                            .filter(p => !p.bot)
-                            .map(p => p.user_id);
+                // 5. Frontend ko data bhejein
+                io.to(roomId).emit("numberCalled", {
+                    number: number,
+                    turn: room.turn,
+                    players: playersProgress, // Isme ab hasUsedPower property ja rahi hai
+                });
 
-                        // Bulk update: Sabhi players ke coins ek saath deduct karein
-                        await User.updateMany(
-                            { user_id: { $in: realPlayerIds } },
-                            { $inc: { coins: -entryFee } }
-                        );
+                // 6. Next Turn Timer/Bot logic
+                const activePlayer = room.players.find(p => p.user_id === room.turn);
+                if (activePlayer.bot) {
+                    handleBotTurn(roomId, activePlayer.user_id, io);
+                } else {
+                    // Note: startTurnTimer mein check karein ki wo turn skip na kar de
+                    startTurnTimer(roomId, activePlayer.user_id, io, isPower);
+                }
+            }
+            const handleBotTurn = async (roomId, botUserId, io) => {
+                const delay = Math.floor(Math.random() * 3000) + 2000; // 2 to 5 seconds delay
+
+                setTimeout(async () => {
+                    try {
+                        const room = await Room.findOne({ roomId });
+                        if (!room || room.status !== 'playing' || room.turn !== botUserId) return;
+
+                        const botPlayer = room.players.find(p => p.user_id === botUserId);
+                        const chosenNumber = getBotDecision(botPlayer, room);
+
+                        if (chosenNumber) {
+                            room.calledNumbers.push(chosenNumber);
+
+                            // Line Update Logic
+                            room.players.forEach(player => {
+                                player.tickets.forEach((ticket, tIdx) => {
+                                    player.completedLines[tIdx] = checkBingoLines(ticket, room.calledNumbers);
+                                });
+                            });
+
+                            const playersProgress = room.players.map(player => {
+                                player.tickets.forEach((ticket, tIdx) => {
+                                    player.completedLines[tIdx] = checkBingoLines(ticket, room.calledNumbers);
+                                });
+
+                                // Sirf id aur completedLines return kar rahe hain
+                                return {
+                                    user_id: player.user_id,
+                                    completedLines: player.completedLines
+                                };
+                            });
+
+                            const currentIndex = room.players.findIndex(p => p.user_id === botUserId);
+                            const nextPlayer = room.players[(currentIndex + 1) % room.players.length];
+                            room.turn = nextPlayer.user_id;
+
+                            await room.save();
+
+                            io.to(roomId).emit("numberCalled", { number: chosenNumber, turn: room.turn, players: playersProgress });
+
+                            if (nextPlayer.bot) {
+                                handleBotTurn(roomId, nextPlayer.user_id, io);
+                            } else {
+                                startTurnTimer(roomId, nextPlayer.user_id, io);
+                            }
+                        }
+                    } catch (err) { console.error("Bot Turn Error:", err); }
+                }, delay);
+            };
+            socket.on("userpowercheck", async ({ roomId, user_id }) => {
+                try {
+
+                    if (user_id != socket.verified_id) {
+                        return socket.emit("error", { message: "Unauthorized!" });
+                    }
+                    const room = await Room.findOne({ roomId });
+
+                    if (!room) {
+                        return socket.emit("userpowercheck", {
+                            canUsePower: false,
+                            message: "Room not found"
+                        });
                     }
 
-                    room.status = 'playing';
-                    const firstPlayer = room.players[0];
-                    room.turn = firstPlayer.user_id;
-                    await room.save();
+                    // 1. Room ke players mein se current user ko dhoondhen
+                    const player = room.players.find(p => p.user_id === user_id);
 
-                    io.to(roomId).emit("gameStarted", {
-                        roomId: roomId,
-                        players: room.players,
-                        status: 'playing',
-                        turn: room.turn,
-                        calledNumbers: []
+                    if (!player) {
+                        return socket.emit("userpowercheck", {
+                            canUsePower: false,
+                            message: "Player not found"
+                        });
+                    }
+
+                    // 2. Conditions check karein:
+                    // - Kya uski turn hai?
+                    // - Kya usne pehle power use kar li hai?
+                    // - Kya game abhi chal raha hai?
+                    const isHisTurn = room.turn === user_id;
+                    const alreadyUsed = player.hasUsedPower;
+                    const isPlaying = room.status === 'playing';
+
+                    let canUse = false;
+                    let msg = "";
+
+                    if (!isPlaying) {
+                        msg = "Game is not active.";
+                    } else if (!isHisTurn) {
+                        msg = "Wait for your turn.";
+                    } else if (alreadyUsed) {
+                        msg = "You have already used your power once!";
+                    } else {
+                        canUse = true;
+                        msg = "Power available!";
+                    }
+
+                    // 3. Response bhejein
+                    socket.emit("userpowercheck", {
+                        canUsePower: canUse,
+                        message: msg
                     });
 
-                    // Agar pehla turn Bot ka hai
-                    if (firstPlayer.bot) {
-                        handleBotTurn(roomId, firstPlayer.user_id, io);
-                    } else {
-                        startTurnTimer(roomId, firstPlayer.user_id, io);
-                    }
-                } else {
-                    socket.emit("waitingForOpponent", { message: "Opponent is still filling their cards..." });
+                } catch (err) {
+                    console.error("Power Check Error:", err);
+                    socket.emit("userpowercheck", { canUsePower: false, message: "Server error" });
                 }
-            } catch (err) { console.error("Submit Error:", err); }
-        });
-
-
-        function startTurnTimer(roomId, nextUserId, io, isPower = false,) {
-            // console.log("room",roomId)
-            if (turnTimeouts[roomId]) clearTimeout(turnTimeouts[roomId]);
-
-            turnTimeouts[roomId] = setTimeout(async () => {
+            });
+            socket.on("callNumber", async ({ roomId, number, user_id, isPower }) => { // isPower flag add kiya
                 try {
-                    const room = await Room.findOne({ roomId });
-                    if (!room || room.turn !== nextUserId || room.status !== 'playing') return;
-
-                    const playerIdx = room.players.findIndex(p => p.user_id === nextUserId);
-                    const player = room.players[playerIdx];
-                    // console.log("player",player)
-                    // 1st Time Miss: Auto-Call Number
-                    if (!player.missedTurns || player.missedTurns < 1) {
-                        player.missedTurns = (player.missedTurns || 0) + 1;
-
-                        // Bot logic use karke ek random number uthayein jo ticket mein ho
-                        let availableNumbers = player.tickets[0].flat().filter(n => !room.calledNumbers.includes(n));
-                        const autoNumber = availableNumbers[Math.floor(Math.random() * availableNumbers.length)];
-
-                        console.log(`Auto-calling for ${nextUserId}`);
-                        await processMove(room, autoNumber, nextUserId, io, isPower);
+                    if (user_id != socket.verified_id) {
+                        return socket.emit("error", { message: "Unauthorized!" });
                     }
-                    // 2nd Time Miss: Opponent Wins
-                    else {
+
+
+                    if (turnTimeouts[roomId]) {
+                        clearTimeout(turnTimeouts[roomId]);
+                        delete turnTimeouts[roomId];
+                    }
+
+                    const room = await Room.findOne({ roomId });
+                    if (!room || room.turn !== user_id || room.status !== 'playing') return;
+
+                    const currentPlayer = room.players.find(p => p.user_id === user_id);
+                    if (currentPlayer) currentPlayer.missedTurns = 0;
+
+                    // Pass isPower to processMove
+                    await processMove(room, number, user_id, io, isPower);
+
+                } catch (err) { console.error(err); }
+            });
+            // socket.on("callNumber", async ({ roomId, number, user_id }) => {
+            //     try {
+            //         // Move aayi toh timer clear karein
+            //         if (turnTimeouts[roomId]) {
+            //             clearTimeout(turnTimeouts[roomId]);
+            //             delete turnTimeouts[roomId];
+            //         }
+
+            //         const room = await Room.findOne({ roomId });
+            //         if (!room || room.turn !== user_id || room.status !== 'playing') return;
+
+            //         // Player ne move chal di, isliye missedTurns reset karein
+            //         const currentPlayer = room.players.find(p => p.user_id === user_id);
+            //         if (currentPlayer) currentPlayer.missedTurns = 0;
+
+            //         await processMove(room, number, user_id, io);
+
+            //     } catch (err) { console.error(err); }
+            // });
+            socket.on("claimBingo", async ({ roomId, user_id }) => {
+                try {
+
+                    if (user_id != socket.verified_id) {
+                        return socket.emit("error", { message: "Unauthorized!" });
+                    }
+                    const room = await Room.findOne({ roomId });
+                    if (!room || room.status !== 'playing') return;
+
+                    const player = room.players.find(p => p.user_id === user_id);
+                    if (player && player.completedLines.some(l => l >= 5)) {
                         room.status = 'finished';
-                        // console.log("status",room.status)
-                        // Saamne wala winner (2 players case mein index 0 ka 1, aur 1 ka 0)
-                        const winnerIndex = (playerIdx + 1) % room.players.length;
-                        const winner = room.players[winnerIndex];
-
-                        room.winner = winner.name;
+                        room.winner = player.name;
                         await room.save();
+                        io.to(roomId).emit("gameOver", { winner: player.name, user_id: player.user_id });
                         await Room.deleteOne({ roomId: room.roomId });
-
-                        io.to(roomId).emit("gameOver", {
-                            winner: winner.name,
-                            user_id: winner.user_id,
-                            reason: "Opponent missed turns twice."
-                        });
-
-
-
                         const wallet = await GameWallet.findOne({ _id: room.gamelobby_id });
+
+                        // console.log("wallet",wallet)
                         if (!wallet) return;
 
                         // 🔹 winner coins ADD (not replace)
                         await User.findOneAndUpdate(
-                            { user_id: winner.user_id },
+                            { user_id: player.user_id },
                             {
                                 $inc: {
                                     coins: wallet.coinsWon, // ex: 400
@@ -600,309 +969,12 @@ module.exports = (server) => {
                             },
                             { new: true }
                         );
+
                     }
-                } catch (e) { console.error("Timer Error:", e); }
-            }, 30000);
-        }
-        // async function processMove(room, number, user_id, io) {
-        //     const roomId = room.roomId;
-        //     // console.log("number",number)
-        //     if (!room.calledNumbers.includes(number)) {
-        //         room.calledNumbers.push(number);
-        //     }
-
-        //     const playersProgress = room.players.map(player => {
-        //         player.tickets.forEach((ticket, tIdx) => {
-        //             player.completedLines[tIdx] = checkBingoLines(ticket, room.calledNumbers);
-        //         });
-        //         return { user_id: player.user_id, completedLines: player.completedLines };
-        //     });
-
-        //     const currentIndex = room.players.findIndex(p => p.user_id === user_id);
-        //     const nextPlayer = room.players[(currentIndex + 1) % room.players.length];
-        //     room.turn = nextPlayer.user_id;
-
-        //     await room.save();
-        //     // console.log("playersProgress",playersProgress)
-        //     io.to(roomId).emit("numberCalled", {
-        //         number: number,
-        //         turn: room.turn,
-        //         players: playersProgress
-        //     });
-
-        //     if (nextPlayer.bot) {
-        //         handleBotTurn(roomId, nextPlayer.user_id, io);
-        //     } else {
-        //         // console.log("roomId",roomId ,nextPlayer.user_id)
-        //         startTurnTimer(roomId, nextPlayer.user_id, io);
-        //     }
-        // }
-        async function processMove(room, number, user_id, io, isPower = false) {
-            const roomId = room.roomId;
-            const currentIndex = room.players.findIndex(p => p.user_id === user_id);
-            const currentPlayer = room.players[currentIndex];
-
-            // 1. Numbers add aur progress check
-            if (!room.calledNumbers.includes(number)) {
-                room.calledNumbers.push(number);
-            }
-
-            // 2. Logic for Power and Turn Management
-            let shouldChangeTurn = true;
-
-            if (isPower && !currentPlayer.hasUsedPower) {
-                // Agar player ne power button dabaya hai aur uske paas power bachi hai
-                if (currentPlayer.powerTurnCount === 0) {
-                    currentPlayer.powerTurnCount = 1; // Pehla turn count karo
-                    currentPlayer.hasUsedPower = true,
-                        shouldChangeTurn = false;         // Turn change NAHI hoga
-                }
-            } else if (currentPlayer.powerTurnCount === 1) {
-                // Player apna extra turn chal chuka hai
-                currentPlayer.powerTurnCount = 0;
-                currentPlayer.hasUsedPower = true;    // AB power permanently khatam
-                shouldChangeTurn = true;
-
-
-                const updatedUser = await User.findOneAndUpdate({
-                    user_id, power: { $gt: 0 }
-                }, { $inc: { power: -1 } }, { new: true });
-
-                // Ab turn change hoga
-            } else {
-                // Normal move logic
-                shouldChangeTurn = true;
-            }
-
-            // 3. Sabhi players ka updated data (including power status) taiyar karein
-            const playersProgress = room.players.map(player => {
-                // Har ticket ke liye bingo lines check karein
-                player.tickets.forEach((ticket, tIdx) => {
-                    player.completedLines[tIdx] = checkBingoLines(ticket, room.calledNumbers);
-                });
-
-                return {
-                    user_id: player.user_id,
-                    completedLines: player.completedLines,
-                    hasUsedPower: player.hasUsedPower, // Frontend ko batane ke liye ki button hide/disable karna hai
-                    powerTurnCount: player.powerTurnCount // Debugging ya UI ke liye
-                };
+                } catch (err) { console.error(err); }
             });
 
-            // 4. Turn change management
-            if (shouldChangeTurn) {
-                const nextIndex = (currentIndex + 1) % room.players.length;
-                room.turn = room.players[nextIndex].user_id;
-            } else {
-                room.turn = currentPlayer.user_id; // Turn wapas usi ko do
-            }
 
-            await room.save();
-
-            // 5. Frontend ko data bhejein
-            io.to(roomId).emit("numberCalled", {
-                number: number,
-                turn: room.turn,
-                players: playersProgress, // Isme ab hasUsedPower property ja rahi hai
-            });
-
-            // 6. Next Turn Timer/Bot logic
-            const activePlayer = room.players.find(p => p.user_id === room.turn);
-            if (activePlayer.bot) {
-                handleBotTurn(roomId, activePlayer.user_id, io);
-            } else {
-                // Note: startTurnTimer mein check karein ki wo turn skip na kar de
-                startTurnTimer(roomId, activePlayer.user_id, io, isPower);
-            }
-        }
-        const handleBotTurn = async (roomId, botUserId, io) => {
-            const delay = Math.floor(Math.random() * 3000) + 2000; // 2 to 5 seconds delay
-
-            setTimeout(async () => {
-                try {
-                    const room = await Room.findOne({ roomId });
-                    if (!room || room.status !== 'playing' || room.turn !== botUserId) return;
-
-                    const botPlayer = room.players.find(p => p.user_id === botUserId);
-                    const chosenNumber = getBotDecision(botPlayer, room);
-
-                    if (chosenNumber) {
-                        room.calledNumbers.push(chosenNumber);
-
-                        // Line Update Logic
-                        room.players.forEach(player => {
-                            player.tickets.forEach((ticket, tIdx) => {
-                                player.completedLines[tIdx] = checkBingoLines(ticket, room.calledNumbers);
-                            });
-                        });
-
-                        const playersProgress = room.players.map(player => {
-                            player.tickets.forEach((ticket, tIdx) => {
-                                player.completedLines[tIdx] = checkBingoLines(ticket, room.calledNumbers);
-                            });
-
-                            // Sirf id aur completedLines return kar rahe hain
-                            return {
-                                user_id: player.user_id,
-                                completedLines: player.completedLines
-                            };
-                        });
-
-                        const currentIndex = room.players.findIndex(p => p.user_id === botUserId);
-                        const nextPlayer = room.players[(currentIndex + 1) % room.players.length];
-                        room.turn = nextPlayer.user_id;
-
-                        await room.save();
-
-                        io.to(roomId).emit("numberCalled", { number: chosenNumber, turn: room.turn, players: playersProgress });
-
-                        if (nextPlayer.bot) {
-                            handleBotTurn(roomId, nextPlayer.user_id, io);
-                        } else {
-                            startTurnTimer(roomId, nextPlayer.user_id, io);
-                        }
-                    }
-                } catch (err) { console.error("Bot Turn Error:", err); }
-            }, delay);
-        };
-        socket.on("userpowercheck", async ({ roomId, user_id }) => {
-            try {
-
-                        if (user_id != socket.verified_id) {
-          return socket.emit("error", { message: "Unauthorized!" });
-        }
-                const room = await Room.findOne({ roomId });
-
-                if (!room) {
-                    return socket.emit("userpowercheck", {
-                        canUsePower: false,
-                        message: "Room not found"
-                    });
-                }
-
-                // 1. Room ke players mein se current user ko dhoondhen
-                const player = room.players.find(p => p.user_id === user_id);
-
-                if (!player) {
-                    return socket.emit("userpowercheck", {
-                        canUsePower: false,
-                        message: "Player not found"
-                    });
-                }
-
-                // 2. Conditions check karein:
-                // - Kya uski turn hai?
-                // - Kya usne pehle power use kar li hai?
-                // - Kya game abhi chal raha hai?
-                const isHisTurn = room.turn === user_id;
-                const alreadyUsed = player.hasUsedPower;
-                const isPlaying = room.status === 'playing';
-
-                let canUse = false;
-                let msg = "";
-
-                if (!isPlaying) {
-                    msg = "Game is not active.";
-                } else if (!isHisTurn) {
-                    msg = "Wait for your turn.";
-                } else if (alreadyUsed) {
-                    msg = "You have already used your power once!";
-                } else {
-                    canUse = true;
-                    msg = "Power available!";
-                }
-
-                // 3. Response bhejein
-                socket.emit("userpowercheck", {
-                    canUsePower: canUse,
-                    message: msg
-                });
-
-            } catch (err) {
-                console.error("Power Check Error:", err);
-                socket.emit("userpowercheck", { canUsePower: false, message: "Server error" });
-            }
         });
-        socket.on("callNumber", async ({ roomId, number, user_id, isPower }) => { // isPower flag add kiya
-            try {
-        if (user_id != socket.verified_id) {
-          return socket.emit("error", { message: "Unauthorized!" });
-        }
-
-
-                if (turnTimeouts[roomId]) {
-                    clearTimeout(turnTimeouts[roomId]);
-                    delete turnTimeouts[roomId];
-                }
-
-                const room = await Room.findOne({ roomId });
-                if (!room || room.turn !== user_id || room.status !== 'playing') return;
-
-                const currentPlayer = room.players.find(p => p.user_id === user_id);
-                if (currentPlayer) currentPlayer.missedTurns = 0;
-
-                // Pass isPower to processMove
-                await processMove(room, number, user_id, io, isPower);
-
-            } catch (err) { console.error(err); }
-        });
-        // socket.on("callNumber", async ({ roomId, number, user_id }) => {
-        //     try {
-        //         // Move aayi toh timer clear karein
-        //         if (turnTimeouts[roomId]) {
-        //             clearTimeout(turnTimeouts[roomId]);
-        //             delete turnTimeouts[roomId];
-        //         }
-
-        //         const room = await Room.findOne({ roomId });
-        //         if (!room || room.turn !== user_id || room.status !== 'playing') return;
-
-        //         // Player ne move chal di, isliye missedTurns reset karein
-        //         const currentPlayer = room.players.find(p => p.user_id === user_id);
-        //         if (currentPlayer) currentPlayer.missedTurns = 0;
-
-        //         await processMove(room, number, user_id, io);
-
-        //     } catch (err) { console.error(err); }
-        // });
-        socket.on("claimBingo", async ({ roomId, user_id }) => {
-            try {
-
-                        if (user_id != socket.verified_id) {
-          return socket.emit("error", { message: "Unauthorized!" });
-        }
-                const room = await Room.findOne({ roomId });
-                if (!room || room.status !== 'playing') return;
-
-                const player = room.players.find(p => p.user_id === user_id);
-                if (player && player.completedLines.some(l => l >= 5)) {
-                    room.status = 'finished';
-                    room.winner = player.name;
-                    await room.save();
-                    io.to(roomId).emit("gameOver", { winner: player.name, user_id: player.user_id });
-                    await Room.deleteOne({ roomId: room.roomId });
-                    const wallet = await GameWallet.findOne({ _id: room.gamelobby_id });
-
-                    // console.log("wallet",wallet)
-                    if (!wallet) return;
-
-                    // 🔹 winner coins ADD (not replace)
-                    await User.findOneAndUpdate(
-                        { user_id: player.user_id },
-                        {
-                            $inc: {
-                                coins: wallet.coinsWon, // ex: 400
-                                diamonds: wallet.diamondsWon
-                            }
-                        },
-                        { new: true }
-                    );
-
-                }
-            } catch (err) { console.error(err); }
-        });
-
-
-    });
 
 };
