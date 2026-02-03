@@ -553,7 +553,8 @@ module.exports = (server) => {
                     if (!room) return;
 
                     // 2. Player updates (In-memory changes)
-                    const player = room.players.find(p => p.user_id === user_id);
+                    const player = room.players.find(p => p.user_id.toString() === user_id.toString());
+                    console.log("player",player)
                     if (player) {
                         player.tickets = tickets;
                         player.isReady = true;
@@ -563,7 +564,7 @@ module.exports = (server) => {
 
                     // 3. Check if all players are ready BEFORE saving
                     const allReady = room.players.every(p => p.isReady);
-
+                    console.log("allReady",allReady)
                     if (allReady) {
                         const lobby = await GameWallet.findById(room.gamelobby_id);
                         const entryFee = lobby ? lobby.entryCoinsUsed : 0;
