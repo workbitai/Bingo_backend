@@ -18,4 +18,6 @@ function getAvatarById(avatarId) {
   return avatars[avatarId] || "assets/Avatars/avatar1.webp";
 }
 
+
+
 module.exports = getAvatarById;
