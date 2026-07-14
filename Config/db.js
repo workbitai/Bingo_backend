@@ -11,8 +11,8 @@ const connectDB = async () => {
     } = process.env;
 
     // const uri = `mongodb://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT}/${DB_NAME}?authSource=admin`;
-    const uri = `mongodb://localhost:27017/${DB_NAME}`;
-
+    // const uri = `mongodb://localhost:27017/${DB_NAME}`;
+ const uri = process.env.MONGO_URI || `mongodb://localhost:27017/${DB_NAME}`;
     await mongoose.connect(uri);
 
     console.log("✅ MongoDB Connected");
